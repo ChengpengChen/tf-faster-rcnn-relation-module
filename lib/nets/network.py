@@ -22,7 +22,7 @@ from layer_utils.anchor_target_layer import anchor_target_layer
 from layer_utils.proposal_target_layer import proposal_target_layer
 from utils.visualization import draw_bounding_boxes
 
-from layer_utils.rel_module_util import pos_encoding, rank_embedding, target_dup_rem
+from layer_utils.rel_module_util import pos_encoding
 
 from model.config import cfg
 
@@ -351,7 +351,7 @@ class Network(object):
       fc6 = tf.reshape(fc6, [cfg.TRAIN.IMS_PER_BATCH, nongt_dim//cfg.TRAIN.IMS_PER_BATCH, cfg.RM.FEA_DIM_INSTANCE])
 
       # dim for relation module
-      dim_rel_mod = (cfg.RM.KEY_FEA_DIM*cfg.RM.NUM_RELATION, cfg.RM.KEY_FEA_DIM*cfg.RM.NUM_RELATION, cfg.RM.NUM_RELATION)
+      dim_rel_mod = (cfg.RM.KEY_FEA_DIM*cfg.RM.NUM_RELATION, cfg.RM.KEY_FEA_DIM*cfg.RM.NUM_RELATION, cfg.RM.FEA_DIM_INSTANCE)
 
       fc6_rm = self._attention_module_multi_head(fc6, position_embedding,
                                                  nongt_dim//cfg.TRAIN.IMS_PER_BATCH, cfg.RM.NUM_RELATION,
