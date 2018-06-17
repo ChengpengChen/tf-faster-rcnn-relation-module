@@ -45,7 +45,10 @@ class vgg16(Network):
     
     return net
 
-  def _head_to_tail(self, pool5, is_training, reuse=None):
+  def _head_to_tail(self, pool5, is_training, reuse=None, average_pool=True):
+    # use average_pool=True to be compatible with resnet and mobilenet
+    if average_pool:
+      return pool5
     with tf.variable_scope(self._scope, self._scope, reuse=reuse):
       pool5_flat = slim.flatten(pool5, scope='flatten')
       fc6 = slim.fully_connected(pool5_flat, 4096, scope='fc6')

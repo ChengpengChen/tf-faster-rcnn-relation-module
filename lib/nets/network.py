@@ -337,6 +337,10 @@ class Network(object):
       else:
         raise NotImplementedError
 
+    # not average_pool in resnet and mobilenet, or ignore fc layers in vgg16
+    average_pool = False if cfg.RM.ENABLE_INSTANCE else True
+    fc7 = self._head_to_tail(pool5, is_training, average_pool)
+
     # add the relation module here
     if cfg.RM.ENABLE_INSTANCE:
       print('constructing instance relation module ')
@@ -373,8 +377,6 @@ class Network(object):
                                                  name="fc7_relation_module")
       fc7_rm = tf.reshape(fc7_rm, [nongt_dim, cfg.RM.FEA_DIM_INSTANCE])
       fc7 = fc7_rm
-    else:
-      fc7 = self._head_to_tail(pool5, is_training)
 
     with tf.variable_scope(self._scope, self._scope):
       # region classification

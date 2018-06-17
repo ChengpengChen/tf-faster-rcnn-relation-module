@@ -237,7 +237,7 @@ class mobilenetv1(Network):
 
     return net_conv
 
-  def _head_to_tail(self, pool5, is_training, reuse=None):
+  def _head_to_tail(self, pool5, is_training, reuse=None, average_pool=True):
     with slim.arg_scope(mobilenet_v1_arg_scope(is_training=is_training)):
       fc7 = mobilenet_v1_base(pool5,
                               _CONV_DEFS[12:],
@@ -245,8 +245,9 @@ class mobilenetv1(Network):
                               depth_multiplier=self._depth_multiplier,
                               reuse=reuse,
                               scope=self._scope)
-      # average pooling done by reduce_mean
-      fc7 = tf.reduce_mean(fc7, axis=[1, 2])
+      if average_pool:
+        # average pooling done by reduce_mean
+        fc7 = tf.reduce_mean(fc7, axis=[1, 2])
     return fc7
 
   def get_variables_to_restore(self, variables, var_keep_dic):

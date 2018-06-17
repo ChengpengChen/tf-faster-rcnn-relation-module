@@ -46,6 +46,11 @@ def proposal_layer(rpn_cls_prob, rpn_bbox_pred, im_info, cfg_key, _feat_stride, 
     # Pick th top region proposals after NMS
     if post_nms_topN > 0:
       keep = keep[:post_nms_topN]
+    # not filter out the remaining, but re-ranking and then clip
+    scores_im_i[keep] += 2
+    order = scores_im_i.ravel().argsort()[::-1]
+    keep = order[:post_nms_topN]
+
     proposals = proposals[keep, :]
     scores_im_i = scores_im_i[keep]
     scores.append(scores_im_i)
