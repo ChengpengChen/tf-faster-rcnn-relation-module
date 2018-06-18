@@ -26,8 +26,8 @@ def pos_encoding(rois, fea_dim):
   # change form to ctr_x, ctr_y, widths, heights
   rois[:, 3] = rois[:, 3] - rois[:, 1] + 1
   rois[:, 4] = rois[:, 4] - rois[:, 2] + 1
-  rois[:, 1] = 0.5*(rois[:, 1] + rois[:, 3])
-  rois[:, 2] = 0.5*(rois[:, 2] + rois[:, 4])
+  rois[:, 1] = rois[:, 1] + 0.5*rois[:, 3]
+  rois[:, 2] = rois[:, 2] + 0.5*rois[:, 4]
 
   rois_num_total = rois.shape[0]
   im_num = np.alen(np.unique(rois[:, 0]))
@@ -42,13 +42,16 @@ def pos_encoding(rois, fea_dim):
     pos_encode_tmp = np.zeros(shape=[rois_num, rois_num, 4], dtype=np.float32)
 
     pos_encode_tmp[:, :, 0] = np.divide(rois_im_i[:, 0][:, np.newaxis] - rois_im_i[:, 0][np.newaxis],
-                                        rois_im_i[:, 2][:, np.newaxis] + eps)
+                                        rois_im_i[:, 2][:, np.newaxis])
+    pos_encode_tmp[:, :, 0] = np.maximum(np.abs(pos_encode_tmp[:, :, 0]), eps)
     pos_encode_tmp[:, :, 1] = np.divide(rois_im_i[:, 1][:, np.newaxis] - rois_im_i[:, 1][np.newaxis],
-                                        rois_im_i[:, 3][:, np.newaxis] + eps)
-    pos_encode_tmp[:, :, 2] = np.divide(rois_im_i[:, 2][np.newaxis], rois_im_i[:, 2][:, np.newaxis] + eps)
-    pos_encode_tmp[:, :, 3] = np.divide(rois_im_i[:, 3][np.newaxis], rois_im_i[:, 3][:, np.newaxis] + eps)
+                                        rois_im_i[:, 3][:, np.newaxis])
+    pos_encode_tmp[:, :, 1] = np.maximum(np.abs(pos_encode_tmp[:, :, 1]), eps)
+    pos_encode_tmp[:, :, 2] = np.divide(rois_im_i[:, 2][np.newaxis], rois_im_i[:, 2][:, np.newaxis])
+    pos_encode_tmp[:, :, 3] = np.divide(rois_im_i[:, 3][np.newaxis], rois_im_i[:, 3][:, np.newaxis])
 
-    pos_encode_tmp = np.log(np.maximum(np.abs(pos_encode_tmp), eps))
+    pos_encode_tmp = np.log(pos_encode_tmp)
+    print(pos_encode_tmp[:2, :2, :])
 
     pos_encode_tmp = _pos_encode(pos_encode_tmp, fea_dim)
     # pos_encode_tmp = np.reshape(pos_encode_tmp, [rois_num, rois_num, -1])
@@ -99,8 +102,10 @@ def main():
   print(pos_encode_total.shape)
   # print(pos_encode_total)
   print('===')
-  for i in np.arange(1):
-    print(pos_encode_total[0, i, i, :])
+  print(pos_encode_total[0, 1, 2, :])
+  # print(pos_encode_total[0, 2, 1, :])
+  # for i in np.arange(1):
+  #   print(pos_encode_total[0, i, i, :])
   # print('===')
   # for i in np.arange(5):
   #   print(pos_encode_total[0, i, i+1, :])
