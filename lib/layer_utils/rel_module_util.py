@@ -51,7 +51,7 @@ def pos_encoding(rois, fea_dim):
     pos_encode_tmp[:, :, 3] = np.divide(rois_im_i[:, 3][np.newaxis], rois_im_i[:, 3][:, np.newaxis])
 
     pos_encode_tmp = np.log(pos_encode_tmp)
-    print(pos_encode_tmp[:2, :2, :])
+    # print(pos_encode_tmp[:2, :2, :])
 
     pos_encode_tmp = _pos_encode(pos_encode_tmp, fea_dim)
     # pos_encode_tmp = np.reshape(pos_encode_tmp, [rois_num, rois_num, -1])
