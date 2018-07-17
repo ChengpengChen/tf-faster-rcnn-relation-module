@@ -162,6 +162,27 @@ __C.TRAIN.USE_ALL_GT = True
 # clip the global gradient
 __C.TRAIN.CLIP_GRADIENTS = -1
 
+# rescale the cls loss of rcnn
+__C.TRAIN.RCNN_LOSS_SCALE = 1.0
+
+# rescale the reg loss of rcnn
+__C.TRAIN.RCNN_BOX_SCALE = 1.0
+
+# to enable warm up learning rate setting
+__C.TRAIN.WARMUP = False
+
+# the lr during warm up
+__C.TRAIN.WARMUP_LR = 0.000125
+
+# the step of warm up
+__C.TRAIN.WARMUP_STEP = 4000
+
+# to init from det model, no need to fix conv1 and fc layers
+__C.TRAIN.FROM_DET = False
+
+# to fix layers of base conv and rpn
+__C.TRAIN.FIX_CONV_AND_RPN = False
+
 #
 # Testing options
 #

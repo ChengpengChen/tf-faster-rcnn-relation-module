@@ -185,6 +185,35 @@ class SolverWrapper(object):
 
     return lsf, nfiles, sfiles
 
+  def initialize_zfnet(self, sess):
+    # Initial file lists are empty
+    np_paths = []
+    ss_paths = []
+    # Fresh train directly from ImageNet weights
+    print('Loading initial model weights from .npy file {:s}'.format(self.pretrained_model))
+    variables = tf.global_variables()
+    # Initialize all variables first
+    sess.run(tf.variables_initializer(variables, name='init'))
+    params = np.load(self.pretrained_model, encoding='bytes').item()
+    # only copy conv1~conv4
+    # for conv in ['conv1', 'conv2', 'conv3', 'conv4', 'conv5', 'fc6', 'fc7']:
+    for conv in ['conv1', 'conv2', 'conv3', 'conv4', 'conv5']:
+      weights = params[conv]['weights']
+      bias = params[conv]['biases']
+
+      var = [var for var in variables if conv in var.name]
+      if conv == 'conv1':
+        weights = weights[:, :, ::-1, :]  # bgr to rgb
+      sess.run(tf.assign(var[0], tf.reshape(weights, var[0].get_shape())))
+      sess.run(tf.assign(var[1], tf.reshape(bias, var[1].get_shape())))
+
+    print('Loaded.')
+    last_snapshot_iter = 0
+    rate = cfg.TRAIN.LEARNING_RATE
+    stepsizes = list(cfg.TRAIN.STEPSIZE)
+
+    return rate, last_snapshot_iter, stepsizes, np_paths, ss_paths
+
   def initialize(self, sess):
     # Initial file lists are empty
     np_paths = []
@@ -204,13 +233,18 @@ class SolverWrapper(object):
     # Need to fix the variables before loading, so that the RGB weights are changed to BGR
     # For VGG16 it also changes the convolutional weights fc6 and fc7 to
     # fully connected weights
-    if cfg.RM.ENABLE_INSTANCE:
-      # no need to use the original fc6 and fc7 in relation module
-      self.net.fix_variables_conv1(sess, self.pretrained_model)
+    if not cfg.TRAIN.FROM_DET:
+      if cfg.RM.ENABLE_INSTANCE:
+        # no need to use the original fc6 and fc7 in relation module
+        self.net.fix_variables_conv1(sess, self.pretrained_model)
+        print('Fixed conv1.')
+      else:
+        self.net.fix_variables(sess, self.pretrained_model)
+        print('Fixed.')
     else:
-      self.net.fix_variables(sess, self.pretrained_model)
+      self.net.cpy_variables_conv1(sess, self.pretrained_model)
+      print('Copied')
 
-    print('Fixed.')
     last_snapshot_iter = 0
     rate = cfg.TRAIN.LEARNING_RATE
     stepsizes = list(cfg.TRAIN.STEPSIZE)
@@ -260,6 +294,9 @@ class SolverWrapper(object):
     self.data_layer = RoIDataLayer(self.roidb, self.imdb.num_classes)
     self.data_layer_val = RoIDataLayer(self.valroidb, self.imdb.num_classes, random=True)
 
+    assert (not cfg.TRAIN.WARMUP) or (cfg.TRAIN.WARMUP and cfg.TRAIN.WARMUP_STEP < list(cfg.TRAIN.STEPSIZE)[0]), \
+      'warm up step should not larger than stepsize'
+
     # Construct the computation graph
     lr, train_op = self.construct_graph(sess)
 
@@ -268,7 +305,11 @@ class SolverWrapper(object):
 
     # Initialize the variables or restore them from the last snapshot
     if lsf == 0:
-      rate, last_snapshot_iter, stepsizes, np_paths, ss_paths = self.initialize(sess)
+      if 'zfnet' in self.pretrained_model:
+        init_method = self.initialize_zfnet
+      else:
+        init_method = self.initialize
+      rate, last_snapshot_iter, stepsizes, np_paths, ss_paths = init_method(sess)
     else:
       rate, last_snapshot_iter, stepsizes, np_paths, ss_paths = self.restore(sess, 
                                                                             str(sfiles[-1]), 
@@ -280,7 +321,16 @@ class SolverWrapper(object):
     stepsizes.append(max_iters)
     stepsizes.reverse()
     next_stepsize = stepsizes.pop()
+    # set the warm up learning rate
+    if cfg.TRAIN.WARMUP and cfg.TRAIN.WARMUP_STEP >= iter:
+      sess.run(tf.assign(lr, cfg.TRAIN.WARMUP_LR))
+      assert cfg.TRAIN.WARMUP_STEP < next_stepsize, 'warm up step should not larger than stepsize'
+
     while iter < max_iters + 1:
+      # resume to regular learning scheduler
+      if cfg.TRAIN.WARMUP and iter == cfg.TRAIN.WARMUP_STEP + 1:
+        sess.run(tf.assign(lr, cfg.TRAIN.LEARNING_RATE))
+
       # Learning rate
       if iter == next_stepsize + 1:
         # Add snapshot here before reducing the learning rate

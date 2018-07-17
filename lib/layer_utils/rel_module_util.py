@@ -4,7 +4,7 @@
 # Add relation module by Chengpeng Chen
 # --------------------------------------------------------
 
-# the layer to encoding the geometirc features
+# the layer to encoding the geometric features
 # refer to paper: Relation network for object detection && Attention is all you need
 
 from __future__ import absolute_import
@@ -15,7 +15,7 @@ import numpy as np
 eps = 1e-3
 
 
-def pos_encoding(rois, fea_dim):
+def pos_encoding(rois_ori, fea_dim):
   """
   calculate the relative-position encoding for each location pair
   note: ignore the _feat_stride because of the zero order transformation
@@ -24,6 +24,7 @@ def pos_encoding(rois, fea_dim):
   :return: encoding of the relative-position, [im_num, bbox_num, bbox_num]
   """
   # change form to ctr_x, ctr_y, widths, heights
+  rois = rois_ori.copy()
   rois[:, 3] = rois[:, 3] - rois[:, 1] + 1
   rois[:, 4] = rois[:, 4] - rois[:, 2] + 1
   rois[:, 1] = rois[:, 1] + 0.5*rois[:, 3]

@@ -269,7 +269,7 @@ class Network(object):
       dim_group = (dim[0] // group, dim[1] // group, dim[2] // group)
       # [im_num, num_rois_per_img, num_rois_per_img, group]
       aff_weight = slim.conv2d(position_embedding, group, [1, 1], trainable=is_training,
-                               weights_initializer=initializer, scope='fea_pos') # use relu, use bias
+                               weights_initializer=initializer, scope='fea_pos')  # use relu, use bias
       # [im_num, num_rois_per_img, group, num_rois_per_img]
       aff_weight = tf.transpose(aff_weight, perm=[0, 1, 3, 2])
       aff_weight = tf.reshape(aff_weight, [cfg.TRAIN.IMS_PER_BATCH*num_rois_per_img, group, num_rois_per_img])
@@ -277,13 +277,13 @@ class Network(object):
       # multi head
       assert dim[0] == dim[1], 'Matrix multiply requires same dimensions!'
       fea_q = slim.fully_connected(roi_feat, dim[0], trainable=is_training, activation_fn=None,
-                                   weights_initializer=initializer, biases_initializer=None,
+                                   weights_initializer=initializer,
                                    scope='fea_q')  # projection, use bias, no activation
       fea_q_batch = tf.reshape(fea_q,
                                [cfg.TRAIN.IMS_PER_BATCH, num_rois_per_img, group, dim_group[0]])
       fea_q_batch = tf.transpose(fea_q_batch, perm=[0, 2, 1, 3])
       fea_k = slim.fully_connected(roi_feat, dim[1], trainable=is_training, activation_fn=None,
-                                   weights_initializer=initializer, biases_initializer=None,
+                                   weights_initializer=initializer,
                                    scope='fea_k')  # projection, use bias, no activation
       fea_k_batch = tf.reshape(fea_k,
                                [cfg.TRAIN.IMS_PER_BATCH, num_rois_per_img, group, dim_group[1]])
@@ -299,22 +299,22 @@ class Network(object):
       # v_data = roi_feat
 
       assert fc_dim == group, 'fc_dim != group'
-      # weighted_aff, [im_num, num_rois_per_img, group, num_rois_per_img]
+      # weighted_aff, [im_num*num_rois_per_img, group, num_rois_per_img]
       weighted_aff = tf.log(tf.maximum(aff_weight, 1e-6)) + aff_scale
-      aff_softmax = tf.nn.softmax(weighted_aff, axis=3, name='softmax')
+      aff_softmax = tf.nn.softmax(weighted_aff, axis=2, name='softmax')
       aff_softmax_reshape = tf.reshape(aff_softmax,
                                        [cfg.TRAIN.IMS_PER_BATCH, num_rois_per_img*group, num_rois_per_img])
       # output_t, [im_num, num_rois_per_img * group, feat_dim]
       output_t = tf.matmul(aff_softmax_reshape, v_data)
-      output_t = tf.reshape(output_t, [cfg.TRAIN.IMS_PER_BATCH, num_rois_per_img, group, feat_dim])
-      output_t = tf.reshape(output_t, [cfg.TRAIN.IMS_PER_BATCH*num_rois_per_img, 1, 1, group*feat_dim])
+      # output_t = tf.reshape(output_t, [cfg.TRAIN.IMS_PER_BATCH, num_rois_per_img, group, feat_dim])
+      output_t = tf.reshape(output_t, [cfg.TRAIN.IMS_PER_BATCH*num_rois_per_img*group, 1, 1, feat_dim])
 
-      linear_out = slim.conv2d(output_t, dim[2], kernel_size=[1, 1], trainable=is_training,
+      linear_out = slim.conv2d(output_t, dim[2]//group, kernel_size=[1, 1], trainable=is_training,
                                weights_initializer=initializer, activation_fn=None,
-                               scope='linear_out')  # use relu, use bias
-      output = tf.reshape(linear_out, [cfg.TRAIN.IMS_PER_BATCH, num_rois_per_img, feat_dim])
+                               scope='linear_out')  # no relu, use bias
+      output = tf.reshape(linear_out, [cfg.TRAIN.IMS_PER_BATCH*num_rois_per_img, feat_dim])
 
-      return output + roi_feat
+      return tf.nn.relu(output + roi_feat)
 
   def _build_network(self, is_training=True):
     # select initializers
@@ -339,49 +339,48 @@ class Network(object):
 
     # not average_pool in resnet and mobilenet, or ignore fc layers in vgg16
     average_pool = False if cfg.RM.ENABLE_INSTANCE else True
-    fc7 = self._head_to_tail(pool5, is_training, average_pool)
+    fc7 = self._head_to_tail(pool5, is_training, average_pool=average_pool)
+
+    # fc7 = tf.stop_gradient(fc7)
 
     # add the relation module here
     if cfg.RM.ENABLE_INSTANCE:
       print('constructing instance relation module ')
       position_embedding = self._pos_encoding(rois, is_training)
 
-      nongt_dim = cfg.TRAIN.BATCH_SIZE if is_training else cfg.TEST.RPN_POST_NMS_TOP_N
+      nongt_dim = cfg.TRAIN.BATCH_SIZE // cfg.TRAIN.IMS_PER_BATCH if is_training else cfg.TEST.RPN_POST_NMS_TOP_N
 
-      pool5_flat = slim.flatten(pool5, scope='flatten')
-      fc6 = slim.fully_connected(pool5_flat, cfg.RM.FEA_DIM_INSTANCE, scope='fc6',
-                                 activation_fn=None, biases_initializer=None,
-                                 weights_initializer=initializer)
-      fc6 = tf.reshape(fc6, [cfg.TRAIN.IMS_PER_BATCH, nongt_dim//cfg.TRAIN.IMS_PER_BATCH, cfg.RM.FEA_DIM_INSTANCE])
+      pool5_flat = slim.flatten(fc7, scope='flatten')
 
       # dim for relation module
       dim_rel_mod = (cfg.RM.KEY_FEA_DIM*cfg.RM.NUM_RELATION, cfg.RM.KEY_FEA_DIM*cfg.RM.NUM_RELATION, cfg.RM.FEA_DIM_INSTANCE)
 
+      fc6 = slim.fully_connected(pool5_flat, cfg.RM.FEA_DIM_INSTANCE, scope='fc6_rel',
+                                 activation_fn=None, biases_initializer=tf.zeros_initializer(),
+                                 weights_initializer=initializer)
       fc6_rm = self._attention_module_multi_head(fc6, position_embedding,
-                                                 nongt_dim//cfg.TRAIN.IMS_PER_BATCH, cfg.RM.NUM_RELATION,
+                                                 nongt_dim, cfg.RM.NUM_RELATION,
                                                  cfg.RM.FEA_DIM_INSTANCE, is_training, initializer,
                                                  dim=dim_rel_mod, group=cfg.RM.NUM_RELATION,
                                                  name="fc6_relation_module")
 
-      fc6_rm = tf.reshape(fc6_rm, [nongt_dim, cfg.RM.FEA_DIM_INSTANCE])
-
-      fc7 = slim.fully_connected(fc6_rm, cfg.RM.FEA_DIM_INSTANCE, scope='fc7',
-                                 activation_fn=None, biases_initializer=None,
+      fc7 = slim.fully_connected(fc6_rm, cfg.RM.FEA_DIM_INSTANCE, scope='fc7_rel',
+                                 activation_fn=None, biases_initializer=tf.zeros_initializer(),
                                  weights_initializer=initializer)
-      fc7 = tf.reshape(fc7, [cfg.TRAIN.IMS_PER_BATCH, nongt_dim//cfg.TRAIN.IMS_PER_BATCH, cfg.RM.FEA_DIM_INSTANCE])
-
       fc7_rm = self._attention_module_multi_head(fc7, position_embedding,
-                                                 nongt_dim//cfg.TRAIN.IMS_PER_BATCH, cfg.RM.NUM_RELATION,
+                                                 nongt_dim, cfg.RM.NUM_RELATION,
                                                  cfg.RM.FEA_DIM_INSTANCE, is_training, initializer,
                                                  dim=dim_rel_mod, group=cfg.RM.NUM_RELATION,
                                                  name="fc7_relation_module")
-      fc7_rm = tf.reshape(fc7_rm, [nongt_dim, cfg.RM.FEA_DIM_INSTANCE])
-      fc7 = fc7_rm
-
-    with tf.variable_scope(self._scope, self._scope):
-      # region classification
-      cls_prob, bbox_pred = self._region_classification(fc7, is_training, 
-                                                        initializer, initializer_bbox)
+      with tf.variable_scope('relation_module', 'relation_module'):
+        # region classification
+        cls_prob, bbox_pred = self._region_classification(fc7_rm, is_training,
+                                                          initializer, initializer_bbox)
+    else:
+      with tf.variable_scope(self._scope, self._scope):
+        # region classification
+        cls_prob, bbox_pred = self._region_classification(fc7, is_training,
+                                                          initializer, initializer_bbox)
 
     self._score_summaries.update(self._predictions)
 
@@ -438,7 +437,7 @@ class Network(object):
       self._losses['rpn_cross_entropy'] = rpn_cross_entropy
       self._losses['rpn_loss_box'] = rpn_loss_box
 
-      loss = cross_entropy + loss_box + rpn_cross_entropy + rpn_loss_box
+      loss = cfg.TRAIN.RCNN_LOSS_SCALE*cross_entropy + cfg.TRAIN.RCNN_BOX_SCALE*loss_box + rpn_cross_entropy + rpn_loss_box
       regularization_loss = tf.add_n(tf.losses.get_regularization_losses(), 'regu')
       self._losses['total_loss'] = loss + regularization_loss
 
@@ -447,10 +446,11 @@ class Network(object):
     return loss
 
   def _region_proposal(self, net_conv, is_training, initializer):
-    rpn = slim.conv2d(net_conv, cfg.RPN_CHANNELS, [3, 3], trainable=is_training, weights_initializer=initializer,
+    is_training_rpn = is_training and not cfg.TRAIN.FIX_CONV_AND_RPN
+    rpn = slim.conv2d(net_conv, cfg.RPN_CHANNELS, [3, 3], trainable=is_training_rpn, weights_initializer=initializer,
                         scope="rpn_conv/3x3")
     self._act_summaries.append(rpn)
-    rpn_cls_score = slim.conv2d(rpn, self._num_anchors * 2, [1, 1], trainable=is_training,
+    rpn_cls_score = slim.conv2d(rpn, self._num_anchors * 2, [1, 1], trainable=is_training_rpn,
                                 weights_initializer=initializer,
                                 padding='VALID', activation_fn=None, scope='rpn_cls_score')
     # change it so that the score has 2 as its channel size
@@ -458,7 +458,7 @@ class Network(object):
     rpn_cls_prob_reshape = self._softmax_layer(rpn_cls_score_reshape, "rpn_cls_prob_reshape")
     rpn_cls_pred = tf.argmax(tf.reshape(rpn_cls_score_reshape, [-1, 2]), axis=1, name="rpn_cls_pred")
     rpn_cls_prob = self._reshape_layer(rpn_cls_prob_reshape, self._num_anchors * 2, "rpn_cls_prob")
-    rpn_bbox_pred = slim.conv2d(rpn, self._num_anchors * 4, [1, 1], trainable=is_training,
+    rpn_bbox_pred = slim.conv2d(rpn, self._num_anchors * 4, [1, 1], trainable=is_training_rpn,
                                 weights_initializer=initializer,
                                 padding='VALID', activation_fn=None, scope='rpn_bbox_pred')
     if is_training:

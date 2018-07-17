@@ -16,34 +16,55 @@ import numpy as np
 from nets.network import Network
 from model.config import cfg
 
-class vgg16(Network):
+# """ZF net support"""
+# from kaffe.tensorflow import Network
+#
+# class Zeiler_Net(Network):
+#     def setup(self):
+#         (self.feed('data')
+#              .conv(7, 7, 96, 2, 2, name='conv1')
+#              .lrn(1, 1.66666666667e-05, 0.75, name='norm1')
+#              .max_pool(3, 3, 2, 2, name='pool1')
+#              .conv(5, 5, 256, 2, 2, name='conv2')
+#              .lrn(1, 1.66666666667e-05, 0.75, name='norm2')
+#              .max_pool(3, 3, 2, 2, padding=None, name='pool2')
+#              .conv(3, 3, 384, 1, 1, name='conv3')
+#              .conv(3, 3, 384, 1, 1, name='conv4')
+#              .conv(3, 3, 256, 1, 1, name='conv5')
+#              .max_pool(3, 3, 2, 2, padding='VALID', name='pool5')
+#              .fc(4096, name='fc6')
+#              .fc(4096, name='fc7')
+#              .fc(1000, relu=False, name='fc8')
+#              .softmax(name='prob'))
+
+class zfnet(Network):
   def __init__(self):
     Network.__init__(self)
     self._feat_stride = [16, ]
     self._feat_compress = [1. / float(self._feat_stride[0]), ]
-    self._scope = 'vgg_16'
+    self._scope = 'zfnet'
 
   def _image_to_head(self, is_training, reuse=None):
-    is_training_conv = is_training and not cfg.TRAIN.FIX_CONV_AND_RPN
     with tf.variable_scope(self._scope, self._scope, reuse=reuse):
-      net = slim.repeat(self._image, 2, slim.conv2d, 64, [3, 3],
-                        trainable=False, scope='conv1')
-      net = slim.max_pool2d(net, [2, 2], padding='SAME', scope='pool1')
-      net = slim.repeat(net, 2, slim.conv2d, 128, [3, 3],
-                        trainable=False, scope='conv2')
-      net = slim.max_pool2d(net, [2, 2], padding='SAME', scope='pool2')
-      net = slim.repeat(net, 3, slim.conv2d, 256, [3, 3],
-                        trainable=is_training_conv, scope='conv3')
-      net = slim.max_pool2d(net, [2, 2], padding='SAME', scope='pool3')
-      net = slim.repeat(net, 3, slim.conv2d, 512, [3, 3],
-                        trainable=is_training_conv, scope='conv4')
-      net = slim.max_pool2d(net, [2, 2], padding='SAME', scope='pool4')
-      net = slim.repeat(net, 3, slim.conv2d, 512, [3, 3],
-                        trainable=is_training_conv, scope='conv5')
+      net = slim.conv2d(self._image, 96, kernel_size=[7, 7], stride=[2, 2],
+                        trainable=is_training, scope='conv1')
+      net = tf.nn.local_response_normalization(net, depth_radius=1, alpha=1.66666666667e-05, beta=0.75, name='norm1')
+      net = slim.max_pool2d(net, [2, 2], scope='pool1', padding='SAME')
+      net = slim.conv2d(net, 256, kernel_size=[5, 5], stride=[2, 2],
+                        trainable=is_training, scope='conv2')
+      net = tf.nn.local_response_normalization(net, depth_radius=1, alpha=1.66666666667e-05, beta=0.75, name='norm2')
+      net = slim.max_pool2d(net, [2, 2], scope='pool2', padding='SAME')
+
+      net = slim.conv2d(net, 384, kernel_size=[3, 3], stride=[1, 1],
+                        trainable=is_training, scope='conv3')
+      net = slim.conv2d(net, 384, kernel_size=[3, 3], stride=[1, 1],
+                        trainable=is_training, scope='conv4')
+      net = slim.conv2d(net, 256, kernel_size=[3, 3], stride=[1, 1],
+                        trainable=is_training, scope='conv5')
 
     self._act_summaries.append(net)
     self._layers['head'] = net
-    
+
     return net
 
   def _head_to_tail(self, pool5, is_training, reuse=None, average_pool=True):
@@ -54,12 +75,12 @@ class vgg16(Network):
       pool5_flat = slim.flatten(pool5, scope='flatten')
       fc6 = slim.fully_connected(pool5_flat, 4096, scope='fc6')
       if is_training:
-        fc6 = slim.dropout(fc6, keep_prob=0.5, is_training=True, 
-                            scope='dropout6')
+        fc6 = slim.dropout(fc6, keep_prob=0.5, is_training=True,
+                           scope='dropout6')
       fc7 = slim.fully_connected(fc6, 4096, scope='fc7')
       if is_training:
-        fc7 = slim.dropout(fc7, keep_prob=0.5, is_training=True, 
-                            scope='dropout7')
+        fc7 = slim.dropout(fc7, keep_prob=0.5, is_training=True,
+                           scope='dropout7')
 
     return fc7
 
@@ -102,26 +123,3 @@ class vgg16(Network):
                             self._variables_to_fix[self._scope + '/fc7/weights:0'].get_shape())))
         sess.run(tf.assign(self._variables_to_fix[self._scope + '/conv1/conv1_1/weights:0'], 
                             tf.reverse(conv1_rgb, [2])))
-
-  def fix_variables_conv1(self, sess, pretrained_model):
-    print('Fix VGG16 layers..')
-    with tf.variable_scope('Fix_VGG16') as scope:
-      with tf.device("/cpu:0"):
-        # fix RGB to BGR
-        conv1_rgb = tf.get_variable("conv1_rgb", [3, 3, 3, 64], trainable=False)
-        restorer_fc = tf.train.Saver({self._scope + "/conv1/conv1_1/weights": conv1_rgb})
-        restorer_fc.restore(sess, pretrained_model)
-
-        sess.run(tf.assign(self._variables_to_fix[self._scope + '/conv1/conv1_1/weights:0'],
-                           tf.reverse(conv1_rgb, [2])))
-
-  def cpy_variables_conv1(self, sess, pretrained_model):
-    print('Copy conv1 of VGG16 layers..')
-    with tf.variable_scope('Copy_VGG16') as scope:
-      with tf.device("/cpu:0"):
-        # just copy conv1
-        conv1_rgb = tf.get_variable("conv1_rgb", [3, 3, 3, 64], trainable=False)
-        restorer_fc = tf.train.Saver({self._scope + "/conv1/conv1_1/weights": conv1_rgb})
-        restorer_fc.restore(sess, pretrained_model)
-
-        sess.run(tf.assign(self._variables_to_fix[self._scope + '/conv1/conv1_1/weights:0'], conv1_rgb))
