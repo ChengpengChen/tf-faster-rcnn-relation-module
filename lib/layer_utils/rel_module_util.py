@@ -15,7 +15,7 @@ import numpy as np
 eps = 1e-3
 
 
-def pos_encoding(rois_ori, fea_dim):
+def pos_encoding(rois_ori, fea_dim, nongt_dim=-1):
   """
   calculate the relative-position encoding for each location pair
   note: ignore the _feat_stride because of the zero order transformation
@@ -51,6 +51,7 @@ def pos_encoding(rois_ori, fea_dim):
     pos_encode_tmp[:, :, 2] = np.divide(rois_im_i[:, 2][np.newaxis], rois_im_i[:, 2][:, np.newaxis])
     pos_encode_tmp[:, :, 3] = np.divide(rois_im_i[:, 3][np.newaxis], rois_im_i[:, 3][:, np.newaxis])
 
+    pos_encode_tmp = pos_encode_tmp if nongt_dim < 0 else pos_encode_tmp[:, :nongt_dim]
     pos_encode_tmp = np.log(pos_encode_tmp)
     # print(pos_encode_tmp[:2, :2, :])
 
@@ -70,6 +71,7 @@ def _pos_encode(position_mat, feat_dim, wave_length=1000):
   """
   # position_mat, [num_rois, nongt_dim, 4]
   rois_num = position_mat.shape[0]
+  nongt_dim = position_mat.shape[1]
   feat_range = np.arange(0, feat_dim / 8)
   dim_mat = np.power(np.full((1,), wave_length),
                      (8. / feat_dim) * feat_range)
@@ -81,7 +83,7 @@ def _pos_encode(position_mat, feat_dim, wave_length=1000):
   # embedding, [num_rois, nongt_dim, 4, feat_dim/4]
   embedding = np.concatenate([sin_mat, cos_mat], axis=3)
   # embedding, [num_rois, nongt_dim, feat_dim]
-  embedding = np.reshape(embedding, [rois_num, rois_num, feat_dim])
+  embedding = np.reshape(embedding, [rois_num, nongt_dim, feat_dim])
   return embedding
 
 
